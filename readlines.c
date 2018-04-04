@@ -1,11 +1,10 @@
-B
 #include <sys/types.h>		/* for lseek, read */
+#include <unistd.h>		/* for lseek, read */
 #include <sys/stat.h>		/* for read */
 #include <fcntl.h>		/* for read */
-#include <unistd.h>		/* for read */
 #include <stdlib.h>		/* for malloc */
-
 #include <assert.h>		/* for assert */
+
 #include "assert2.h"		/* for assert2 */
 #include "strcopy.h"  		/* for strcopy */
 #include "readlines.h"		/* for consistency */
@@ -14,17 +13,19 @@ B
 
 // Count the number of lines in open file fd.
 // Also computes maximum line length
+// pMaxLineLen is pointer to an output variable
 int countLines(int fd, int *pMaxLineLen)
 {
   char buf[BUFLEN], *pBuf, *pBufLimit; /* read buffer */
   char lastChar;		       /* last character read */
   int numBytesRead;		       /* from last read */
   int numLines = 0, lineLen = 0, maxLineLen = 0;
-  
+
+  // read file one BUFLEN at a time
   while(numBytesRead = read(fd, &buf, BUFLEN)) {
-    assert2(numBytesRead >= 0, "error reading file");
-    pBufLimit = buf + numBytesRead; // immediately following last byte read 
-    for (pBuf = buf; pBuf != pBufLimit; pBuf++) { // ...every character in buf
+    assert2(numBytesRead > 0, "error reading file");
+    pBufLimit = buf + numBytesRead; /* immediately following last byte read */
+    for (pBuf = buf; pBuf != pBufLimit; pBuf++) { /* ...every character in buf */
       lastChar = *pBuf;
       if (lastChar == '\n') {
 	numLines++;
@@ -34,7 +35,7 @@ int countLines(int fd, int *pMaxLineLen)
 	lineLen ++;
     }
   }
-  if (lastChar != '\n') { // notice if last line isn't terminated
+  if (lastChar != '\n') { /* notice if last line isn't terminated */
     numLines++;
     maxLineLen = lineLen > maxLineLen ? lineLen : maxLineLen;
   }
@@ -43,7 +44,8 @@ int countLines(int fd, int *pMaxLineLen)
 }
 
 // Reads lines from open fd
-// Fd must be seekable
+// Fd must be seekable 
+// Returns 0 terminated vector of strings
 char **readLines(int fd)
 {
   int numBytesRead, numLines, maxLineLen, numLinesRead = 0;
@@ -51,13 +53,15 @@ char **readLines(int fd)
   char **lines, *lineBuf, **pLines, **pLinesLimit;
   off_t initialFileOffset;
 
-  /* save initial file offset */
+  /* determine # of lines & maximum line len */
   assert2((initialFileOffset = lseek(fd, 0, SEEK_CUR)) >= 0, 
+	  "fd must be seekable");  /* save initial file offset */
+  numLines = countLines(fd, &maxLineLen); 
+  /* re-set file offset  */
+  assert2(lseek(fd, initialFileOffset, SEEK_SET) == initialFileOffset,
 	  "fd must be seekable");
 
-  numLines = countLines(fd, &maxLineLen); // count number of lines & maximum line length
-
-  /* allocate vector to store words */
+  /* allocate vector to store lines */
   lines = (char **)malloc(sizeof(char*) * (numLines + 1)); 
   pLinesLimit = lines + numLines;
   assert2(lines != 0, "can't allocate memory to store vector of input lines");
@@ -66,26 +70,24 @@ char **readLines(int fd)
   /* allocate line buffer */
   assert((lineBuf = (char *)malloc(maxLineLen+1)) != 0);
   
-  /* re-initialize file offset  */
-  assert2(lseek(fd, initialFileOffset, SEEK_SET) == initialFileOffset,
-	  "fd must be seekable");
-
-  for (pLines = lines; pLines < pLinesLimit; pLines++) { // for each line 
+  /* read and copy lines from file into lines */
+  for (pLines = lines; pLines < pLinesLimit; pLines++) { /* for each line */ 
     char *pLineBuf = lineBuf;
     while(numBytesRead = read(fd, &readBuf, BUFLEN)) {
-      assert2(numBytesRead >= 0, "error reading input file");
+      assert2(numBytesRead > 0, "error reading input file");
       char *pReadBufLimit = readBuf + numBytesRead;
       for (pReadBuf = readBuf; pReadBuf != pReadBufLimit; pReadBuf++) {
 	lastChar = *pReadBuf;
-	if (lastChar == '\n') {	// end of word found
-	  *pLineBuf = 0;	// terminate word 
-	  *(pLines++) = strcopy(lineBuf);
-	  pLineBuf = lineBuf;
-	} else
+	if (lastChar == '\n') {	/* line terminator found */
+	  *pLineBuf = 0;	/* terminate copy in buffer */
+	  *(pLines++) = strcopy(lineBuf); /* insert copy into lines[] */
+	  pLineBuf = lineBuf;	/* reset lineBuf before reading next line */
+	} else			/* otherwise just copy into lineBuf */
 	  *(pLineBuf++) = lastChar;
       }
-      if (lastChar != '\n') {	// last line isn't terminated
-	*pLineBuf = 0;	// terminate word 
+      if (lastChar != '\n') {	/* last line isn't terminated */
+	*pLineBuf = 0;	/* terminate line */
+	// need to copy line, otherwise *pLines will be same as lineBuf
 	*(pLines++) = strcopy(lineBuf);
       }	
     }
